@@ -8,6 +8,7 @@ export default function AdminDashboard({ auth }) {
     { key: "standings", label: "📊 THE BOARD" },
     { key: "new-day", label: "➕ NEW CHAPTER" },
     { key: "days", label: "📕 MANAGE CHAPTERS" },
+    { key: "users", label: "👤 SUBJECTS" },
     { key: "config", label: "⚙ XP CALIBRATION" },
     { key: "backup", label: "💾 LAB ARCHIVE" },
   ];
@@ -71,6 +72,7 @@ export default function AdminDashboard({ auth }) {
       {tab === "standings" && <AdminStandings auth={auth} />}
       {tab === "new-day" && <NewDayForm auth={auth} />}
       {tab === "days" && <ManageDays auth={auth} />}
+      {tab === "users" && <ManageUsers auth={auth} />}
       {tab === "config" && <PointConfig auth={auth} />}
       {tab === "backup" && <BackupPanel auth={auth} />}
     </div>
@@ -575,6 +577,206 @@ function ManageDays({ auth }) {
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+// ── Manage Users (Subjects) ──────────────────────────────────────────────────
+function ManageUsers({ auth }) {
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [resetting, setResetting] = useState({});
+  const [confirmReset, setConfirmReset] = useState(null);
+  const [msg, setMsg] = useState(null);
+  const [search, setSearch] = useState("");
+
+  const fetchUsers = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/admin/users", {
+        headers: { Authorization: `Bearer ${auth.token}` },
+      });
+      setUsers(await res.json());
+    } catch {
+      setMsg({ type: "error", text: "Failed to retrieve test subjects from the lab database." });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchUsers();
+  }, []);
+
+  const resetPassword = async (userId) => {
+    setResetting((r) => ({ ...r, [userId]: true }));
+    setMsg(null);
+    try {
+      const res = await fetch("/api/admin/reset-password", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${auth.token}`,
+        },
+        body: JSON.stringify({ user_id: userId }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setMsg({
+          type: "success",
+          text: `Password for subject "${data.username}" has been reset to default.`,
+        });
+        setConfirmReset(null);
+      } else {
+        setMsg({ type: "error", text: data.error || "Reset failed." });
+      }
+    } catch {
+      setMsg({ type: "error", text: "The Upside Down interfered — password reset failed." });
+    } finally {
+      setResetting((r) => ({ ...r, [userId]: false }));
+    }
+  };
+
+  const filtered = users.filter((u) =>
+    u.username.toLowerCase().includes(search.toLowerCase())
+  );
+
+  if (loading) return <div className="loading">SCANNING SUBJECT DATABASE</div>;
+
+  return (
+    <div>
+      <div className="location-tag" style={{ marginBottom: "1rem" }}>
+        HAWKINS LAB · SUBJECT MANAGEMENT ({users.length})
+      </div>
+      <h3
+        style={{
+          fontFamily: "var(--font-title)",
+          color: "var(--text-muted)",
+          letterSpacing: "0.1em",
+          marginBottom: "1.2rem",
+          fontSize: "var(--fs-md)",
+        }}
+      >
+        REGISTERED TEST SUBJECTS
+      </h3>
+
+      {msg && (
+        <div
+          className={msg.type === "error" ? "msg-error" : "msg-success"}
+          style={{ marginBottom: "1.5rem" }}
+        >
+          {msg.text}
+        </div>
+      )}
+
+      {/* Search */}
+      <div className="form-group" style={{ maxWidth: 400, marginBottom: "1.5rem" }}>
+        <input
+          type="text"
+          placeholder="Search subjects..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{ width: "100%" }}
+        />
+      </div>
+
+      {filtered.length === 0 && (
+        <div
+          className="panel"
+          style={{
+            textAlign: "center",
+            padding: "3rem",
+            color: "var(--text-muted)",
+            fontFamily: "var(--font-mono)",
+            letterSpacing: "0.1em",
+          }}
+        >
+          {search ? "No subjects match that designation." : "No subjects registered yet."}
+        </div>
+      )}
+
+      <div style={{ display: "grid", gap: "0.75rem" }}>
+        {filtered.map((user) => (
+          <div
+            key={user.id}
+            className="panel"
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              flexWrap: "wrap",
+              gap: "0.8rem",
+            }}
+          >
+            <div>
+              <div
+                style={{
+                  fontFamily: "var(--font-title)",
+                  fontSize: "1rem",
+                  color: "var(--text-primary)",
+                  letterSpacing: "0.08em",
+                }}
+              >
+                {user.username}
+              </div>
+              <div
+                style={{
+                  fontFamily: "var(--font-mono)",
+                  fontSize: "0.68rem",
+                  color: "var(--text-muted)",
+                  marginTop: "0.2rem",
+                  letterSpacing: "0.05em",
+                }}
+              >
+                ID: {user.id} · Joined: {new Date(user.created_at).toLocaleDateString()}
+              </div>
+            </div>
+            <div className="flex gap-sm" style={{ alignItems: "center" }}>
+              {confirmReset === user.id ? (
+                <div className="flex gap-sm" style={{ alignItems: "center" }}>
+                  <div
+                    style={{
+                      fontFamily: "var(--font-mono)",
+                      fontSize: "0.7rem",
+                      color: "var(--bright)",
+                      letterSpacing: "0.05em",
+                    }}
+                  >
+                    Reset to "default"?
+                  </div>
+                  <button
+                    className="btn btn-danger"
+                    style={{ fontSize: "0.72rem", padding: "0.3rem 0.7rem" }}
+                    disabled={resetting[user.id]}
+                    onClick={() => resetPassword(user.id)}
+                  >
+                    {resetting[user.id] ? "RESETTING..." : "CONFIRM"}
+                  </button>
+                  <button
+                    className="btn btn-ghost"
+                    style={{ fontSize: "0.72rem", padding: "0.3rem 0.7rem" }}
+                    onClick={() => setConfirmReset(null)}
+                  >
+                    CANCEL
+                  </button>
+                </div>
+              ) : (
+                <button
+                  className="btn btn-ghost"
+                  style={{
+                    fontSize: "0.75rem",
+                    padding: "0.35rem 0.8rem",
+                    border: "1px solid var(--border-glow)",
+                  }}
+                  onClick={() => setConfirmReset(user.id)}
+                >
+                  🔑 RESET PASSWORD
+                </button>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

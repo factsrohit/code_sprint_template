@@ -317,6 +317,28 @@ app.delete("/api/admin/submissions", adminMiddleware, (req, res) => {
   res.json({ success: true });
 });
 
+// Admin reset a user's password to "default"
+app.post("/api/admin/reset-password", adminMiddleware, async (req, res) => {
+  const { user_id } = req.body;
+  if (!user_id) return res.status(400).json({ error: "user_id required" });
+
+  const user = db.getUserById(user_id);
+  if (!user) return res.status(404).json({ error: "User not found" });
+
+  try {
+    const hashed = await bcrypt.hash("default", 10);
+    db.updateUserPassword(user_id, hashed);
+    res.json({ success: true, username: user.username });
+  } catch (e) {
+    res.status(500).json({ error: "Failed to reset password" });
+  }
+});
+
+// Get all users (admin)
+app.get("/api/admin/users", adminMiddleware, (req, res) => {
+  res.json(db.getAllUsers());
+});
+
 // Export all data
 app.get("/api/admin/export", adminMiddleware, (req, res) => {
   const data = db.exportAllData();

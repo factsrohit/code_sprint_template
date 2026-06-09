@@ -93,6 +93,12 @@ function getAllUsers() {
   return db.prepare("SELECT id, username, created_at FROM users").all();
 }
 
+function updateUserPassword(userId, hashedPassword) {
+  return db
+    .prepare("UPDATE users SET password = ? WHERE id = ?")
+    .run(hashedPassword, userId);
+}
+
 // ─── Days ───────────────────────────────────────────────────────────────────
 
 function createDay(dayNumber, title, posterPath, readingMaterial) {
@@ -337,6 +343,7 @@ module.exports = {
   getUserByUsername,
   getUserById,
   getAllUsers,
+  updateUserPassword,
   createDay,
   getAllDays,
   getLatestDay,
