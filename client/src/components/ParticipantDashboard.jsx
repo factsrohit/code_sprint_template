@@ -6,6 +6,7 @@ const TABS = [
   { key: "latest",   label: "ACTIVE CHAPTER",     icon: "⚡", desc: "Current campaign encounter" },
   { key: "previous", label: "CLOSED CHAPTERS",     icon: "📕", desc: "Previous encounters archive" },
   { key: "progress", label: "CHARACTER SHEET",      icon: "🎲", desc: "My campaign stats" },
+  { key: "settings", label: "SETTINGS",             icon: "🔒", desc: "Account settings" },
 ];
 
 /* ── Character Sheet / Progress view ───────────────────────────────────── */
@@ -237,6 +238,190 @@ export default function ParticipantDashboard({ auth }) {
       {view === "latest"   && <LatestDay   auth={auth} />}
       {view === "previous" && <PreviousDays auth={auth} />}
       {view === "progress" && <ProgressView auth={auth} />}
+      {view === "settings" && <SettingsView auth={auth} />}
+    </div>
+  );
+}
+
+/* ── Settings / Change Password view ───────────────────────────────────── */
+function SettingsView({ auth }) {
+  const [form, setForm] = useState({ currentPassword: "", newPassword: "", confirmPassword: "" });
+  const [loading, setLoading] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const [showCurrent, setShowCurrent] = useState(false);
+  const [showNew, setShowNew] = useState(false);
+
+  const handleChange = (field, value) => {
+    setForm((f) => ({ ...f, [field]: value }));
+  };
+
+  const submit = async () => {
+    setMsg(null);
+    if (!form.currentPassword || !form.newPassword || !form.confirmPassword) {
+      setMsg({ type: "error", text: "All fields are required." });
+      return;
+    }
+    if (form.newPassword !== form.confirmPassword) {
+      setMsg({ type: "error", text: "New passwords do not match." });
+      return;
+    }
+    if (form.newPassword.length < 3) {
+      setMsg({ type: "error", text: "New password must be at least 3 characters." });
+      return;
+    }
+    if (form.currentPassword === form.newPassword) {
+      setMsg({ type: "error", text: "New password must be different from current password." });
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await fetch("/api/me/change-password", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${auth.token}`,
+        },
+        body: JSON.stringify({
+          currentPassword: form.currentPassword,
+          newPassword: form.newPassword,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setMsg({ type: "success", text: "Password changed successfully. Your defenses have been upgraded." });
+        setForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+      } else {
+        setMsg({ type: "error", text: data.error || "Failed to change password." });
+      }
+    } catch {
+      setMsg({ type: "error", text: "The Upside Down interfered — request failed." });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={{ maxWidth: 480 }}>
+      <div className="location-tag" style={{ marginBottom: "1rem" }}>
+        HAWKINS LAB · SECURITY CLEARANCE
+      </div>
+      <h3
+        style={{
+          fontFamily: "var(--font-title)",
+          color: "var(--text-muted)",
+          letterSpacing: "0.1em",
+          marginBottom: "0.6rem",
+          fontSize: "var(--fs-md)",
+        }}
+      >
+        CHANGE PASSWORD
+      </h3>
+      <div
+        style={{
+          fontFamily: "var(--font-mono)",
+          fontSize: "0.75rem",
+          color: "var(--text-muted)",
+          marginBottom: "1.5rem",
+          lineHeight: 1.7,
+          letterSpacing: "0.04em",
+        }}
+      >
+        Upgrade your security clearance. Enter your current password to verify identity.
+      </div>
+
+      {msg && (
+        <div
+          className={msg.type === "error" ? "msg-error" : "msg-success"}
+          style={{ marginBottom: "1.5rem" }}
+        >
+          {msg.text}
+        </div>
+      )}
+
+      <div className="panel-glow" style={{ marginBottom: "1.5rem" }}>
+        <div className="form-group">
+          <label>Current Password</label>
+          <div style={{ position: "relative" }}>
+            <input
+              type={showCurrent ? "text" : "password"}
+              value={form.currentPassword}
+              onChange={(e) => handleChange("currentPassword", e.target.value)}
+              placeholder="Enter current password"
+              style={{ width: "100%", paddingRight: "3rem" }}
+            />
+            <button
+              type="button"
+              onClick={() => setShowCurrent(!showCurrent)}
+              style={{
+                position: "absolute",
+                right: "0.5rem",
+                top: "50%",
+                transform: "translateY(-50%)",
+                background: "transparent",
+                border: "none",
+                color: "var(--text-muted)",
+                cursor: "pointer",
+                fontSize: "0.8rem",
+                fontFamily: "var(--font-mono)",
+              }}
+            >
+              {showCurrent ? "HIDE" : "SHOW"}
+            </button>
+          </div>
+        </div>
+
+        <div className="form-group">
+          <label>New Password</label>
+          <div style={{ position: "relative" }}>
+            <input
+              type={showNew ? "text" : "password"}
+              value={form.newPassword}
+              onChange={(e) => handleChange("newPassword", e.target.value)}
+              placeholder="Enter new password"
+              style={{ width: "100%", paddingRight: "3rem" }}
+            />
+            <button
+              type="button"
+              onClick={() => setShowNew(!showNew)}
+              style={{
+                position: "absolute",
+                right: "0.5rem",
+                top: "50%",
+                transform: "translateY(-50%)",
+                background: "transparent",
+                border: "none",
+                color: "var(--text-muted)",
+                cursor: "pointer",
+                fontSize: "0.8rem",
+                fontFamily: "var(--font-mono)",
+              }}
+            >
+              {showNew ? "HIDE" : "SHOW"}
+            </button>
+          </div>
+        </div>
+
+        <div className="form-group" style={{ margin: 0 }}>
+          <label>Confirm New Password</label>
+          <input
+            type="password"
+            value={form.confirmPassword}
+            onChange={(e) => handleChange("confirmPassword", e.target.value)}
+            placeholder="Confirm new password"
+            style={{ width: "100%" }}
+          />
+        </div>
+      </div>
+
+      <button
+        className="btn btn-primary"
+        onClick={submit}
+        disabled={loading}
+        style={{ padding: "0.8rem 2rem", fontSize: "0.85rem" }}
+      >
+        {loading ? "CHANGING..." : "🔒 UPDATE PASSWORD"}
+      </button>
     </div>
   );
 }

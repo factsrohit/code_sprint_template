@@ -162,6 +162,29 @@ app.get("/api/me/progress", authMiddleware, (req, res) => {
   res.json(result);
 });
 
+// Change own password
+app.post("/api/me/change-password", authMiddleware, async (req, res) => {
+  const { currentPassword, newPassword } = req.body;
+  if (!currentPassword || !newPassword)
+    return res.status(400).json({ error: "Current and new password required" });
+  if (newPassword.length < 3)
+    return res.status(400).json({ error: "New password must be at least 3 characters" });
+
+  const user = db.getUserById(req.user.id);
+  if (!user) return res.status(404).json({ error: "User not found" });
+
+  const match = await bcrypt.compare(currentPassword, user.password);
+  if (!match) return res.status(401).json({ error: "Current password is incorrect" });
+
+  try {
+    const hashed = await bcrypt.hash(newPassword, 10);
+    db.updateUserPassword(req.user.id, hashed);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: "Failed to change password" });
+  }
+});
+
 // Get latest day with problems
 app.get("/api/days/latest", authMiddleware, (req, res) => {
   const day = db.getLatestDay();
