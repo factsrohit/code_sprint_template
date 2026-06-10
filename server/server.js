@@ -76,7 +76,7 @@ app.post("/api/auth/register", async (req, res) => {
 
   try {
     const hashed = await bcrypt.hash(password, 10);
-    const result = db.createUser(username.trim(), hashed);
+    const result = await db.createUser(username.trim(), hashed);
     const token = jwt.sign(
       { id: result.lastInsertRowid, username: username.trim(), isAdmin: false },
       config.JWT_SECRET,
@@ -111,7 +111,7 @@ app.post("/api/auth/login", async (req, res) => {
     return res.json({ token, username: config.ADMIN_USERNAME, isAdmin: true });
   }
 
-  const user = db.getUserByUsername(username.trim());
+  const user = await db.getUserByUsername(username.trim());
   if (!user) return res.status(401).json({ error: "Invalid credentials" });
 
   const match = await bcrypt.compare(password, user.password);
@@ -128,38 +128,46 @@ app.post("/api/auth/login", async (req, res) => {
 // ─── Public Routes ────────────────────────────────────────────────────────────
 
 // Public leaderboard
-app.get("/api/leaderboard", (req, res) => {
-  res.json(db.getLeaderboard());
+app.get("/api/leaderboard", async (req, res) => {
+  try {
+    res.json(await db.getLeaderboard());
+  } catch (e) {
+    res.status(500).json({ error: "Failed to load leaderboard" });
+  }
 });
 
 // ─── Participant Routes ────────────────────────────────────────────────────────
 
 // Get my progress
-app.get("/api/me/progress", authMiddleware, (req, res) => {
-  const userId = req.user.id;
-  const config = db.getPointConfig();
-  const subs = db.getSubmissionsByUser(userId);
-  const problems = db.getAllProblems();
-  const days = db.getAllDays();
+app.get("/api/me/progress", authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const pointConfig = await db.getPointConfig();
+    const subs = await db.getSubmissionsByUser(userId);
+    const problems = await db.getAllProblems();
+    const days = await db.getAllDays();
 
-  const dayMap = {};
-  days.forEach((d) => (dayMap[d.id] = d));
-  const problemMap = {};
-  problems.forEach((p) => (problemMap[p.id] = p));
+    const dayMap = {};
+    days.forEach((d) => (dayMap[d.id] = d));
+    const problemMap = {};
+    problems.forEach((p) => (problemMap[p.id] = p));
 
-  const result = subs.map((s) => {
-    const problem = problemMap[s.problem_id];
-    const day = problem ? dayMap[problem.day_id] : null;
-    const pts = day ? db.calcPoints(s.done_at, day.started_at, config) : 0;
-    return {
-      submission: s,
-      problem,
-      day,
-      points: pts,
-    };
-  });
+    const result = subs.map((s) => {
+      const problem = problemMap[s.problem_id];
+      const day = problem ? dayMap[problem.day_id] : null;
+      const pts = day ? db.calcPoints(s.done_at, day.started_at, pointConfig) : 0;
+      return {
+        submission: s,
+        problem,
+        day,
+        points: pts,
+      };
+    });
 
-  res.json(result);
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: "Failed to load progress" });
+  }
 });
 
 // Change own password
@@ -170,7 +178,7 @@ app.post("/api/me/change-password", authMiddleware, async (req, res) => {
   if (newPassword.length < 3)
     return res.status(400).json({ error: "New password must be at least 3 characters" });
 
-  const user = db.getUserById(req.user.id);
+  const user = await db.getUserById(req.user.id);
   if (!user) return res.status(404).json({ error: "User not found" });
 
   const match = await bcrypt.compare(currentPassword, user.password);
@@ -178,7 +186,7 @@ app.post("/api/me/change-password", authMiddleware, async (req, res) => {
 
   try {
     const hashed = await bcrypt.hash(newPassword, 10);
-    db.updateUserPassword(req.user.id, hashed);
+    await db.updateUserPassword(req.user.id, hashed);
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ error: "Failed to change password" });
@@ -186,50 +194,65 @@ app.post("/api/me/change-password", authMiddleware, async (req, res) => {
 });
 
 // Get latest day with problems
-app.get("/api/days/latest", authMiddleware, (req, res) => {
-  const day = db.getLatestDay();
-  if (!day) return res.json(null);
-  const problems = db.getProblemsByDayId(day.id);
-  const userSubs = db.getSubmissionsByUser(req.user.id);
-  const solvedIds = new Set(userSubs.map((s) => s.problem_id));
-  res.json({ day, problems, solvedIds: [...solvedIds] });
+app.get("/api/days/latest", authMiddleware, async (req, res) => {
+  try {
+    const day = await db.getLatestDay();
+    if (!day) return res.json(null);
+    const problems = await db.getProblemsByDayId(day.id);
+    const userSubs = await db.getSubmissionsByUser(req.user.id);
+    const solvedIds = new Set(userSubs.map((s) => s.problem_id));
+    res.json({ day, problems, solvedIds: [...solvedIds] });
+  } catch (e) {
+    res.status(500).json({ error: "Failed to load latest day" });
+  }
 });
 
 // Get all days with problems (for previous days browser)
-app.get("/api/days", authMiddleware, (req, res) => {
-  const days = db.getAllDays();
-  const userSubs = db.getSubmissionsByUser(req.user.id);
-  const solvedIds = new Set(userSubs.map((s) => s.problem_id));
-  const result = days.map((d) => ({
-    day: d,
-    problems: db.getProblemsByDayId(d.id),
-    solvedIds: [...solvedIds],
-  }));
-  res.json(result);
+app.get("/api/days", authMiddleware, async (req, res) => {
+  try {
+    const days = await db.getAllDays();
+    const userSubs = await db.getSubmissionsByUser(req.user.id);
+    const solvedIds = new Set(userSubs.map((s) => s.problem_id));
+    const result = [];
+    for (const d of days) {
+      result.push({
+        day: d,
+        problems: await db.getProblemsByDayId(d.id),
+        solvedIds: [...solvedIds],
+      });
+    }
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: "Failed to load days" });
+  }
 });
 
 // Mark problem as done
-app.post("/api/submissions", authMiddleware, (req, res) => {
-  const { problem_id } = req.body;
-  if (!problem_id) return res.status(400).json({ error: "problem_id required" });
+app.post("/api/submissions", authMiddleware, async (req, res) => {
+  try {
+    const { problem_id } = req.body;
+    if (!problem_id) return res.status(400).json({ error: "problem_id required" });
 
-  const problem = db.getProblemById(problem_id);
-  if (!problem) return res.status(404).json({ error: "Problem not found" });
+    const problem = await db.getProblemById(problem_id);
+    if (!problem) return res.status(404).json({ error: "Problem not found" });
 
-  const day = db.getDayById(problem.day_id);
-  if (!day) return res.status(404).json({ error: "Day not found" });
-  if (!day.is_open) return res.status(403).json({ error: "Day is closed for submissions" });
+    const day = await db.getDayById(problem.day_id);
+    if (!day) return res.status(404).json({ error: "Day not found" });
+    if (!day.is_open) return res.status(403).json({ error: "Day is closed for submissions" });
 
-  // Check not already submitted
-  const existing = db.getSubmissionsByUser(req.user.id).find(
-    (s) => s.problem_id === problem_id
-  );
-  if (existing) return res.status(400).json({ error: "Already submitted" });
+    // Check not already submitted
+    const existing = (await db.getSubmissionsByUser(req.user.id)).find(
+      (s) => s.problem_id === problem_id
+    );
+    if (existing) return res.status(400).json({ error: "Already submitted" });
 
-  const result = db.createSubmission(req.user.id, problem_id);
-  const config = db.getPointConfig();
-  const pts = db.calcPoints(new Date().toISOString(), day.started_at, config);
-  res.json({ success: true, points: pts });
+    await db.createSubmission(req.user.id, problem_id);
+    const pointConfig = await db.getPointConfig();
+    const pts = db.calcPoints(new Date().toISOString(), day.started_at, pointConfig);
+    res.json({ success: true, points: pts });
+  } catch (e) {
+    res.status(500).json({ error: "Failed to create submission" });
+  }
 });
 
 // ─── Admin Routes ─────────────────────────────────────────────────────────────
@@ -239,105 +262,140 @@ app.post(
   "/api/admin/days",
   adminMiddleware,
   upload.single("poster"),
-  (req, res) => {
-    const { day_number, title, reading_material, problems } = req.body;
-    if (!day_number || !title)
-      return res.status(400).json({ error: "day_number and title required" });
-
-    const posterPath = req.file ? req.file.filename : null;
-    const dayResult = db.createDay(
-      parseInt(day_number),
-      title,
-      posterPath,
-      reading_material || null
-    );
-    const dayId = dayResult.lastInsertRowid;
-
-    // problems comes as JSON string from FormData
-    let parsedProblems = [];
+  async (req, res) => {
     try {
-      parsedProblems = JSON.parse(problems || "[]");
-    } catch {
-      parsedProblems = [];
+      const { day_number, title, reading_material, problems } = req.body;
+      if (!day_number || !title)
+        return res.status(400).json({ error: "day_number and title required" });
+
+      const posterPath = req.file ? req.file.filename : null;
+      const dayResult = await db.createDay(
+        parseInt(day_number),
+        title,
+        posterPath,
+        reading_material || null
+      );
+      const dayId = dayResult.lastInsertRowid;
+
+      // problems comes as JSON string from FormData
+      let parsedProblems = [];
+      try {
+        parsedProblems = JSON.parse(problems || "[]");
+      } catch {
+        parsedProblems = [];
+      }
+
+      for (const p of parsedProblems) {
+        if (p.name) await db.createProblem(dayId, p.name, p.external_link || null, p.description || null);
+      }
+
+      const day = await db.getDayById(dayId);
+      const dayProblems = await db.getProblemsByDayId(dayId);
+      res.json({ day, problems: dayProblems });
+    } catch (e) {
+      res.status(500).json({ error: "Failed to create day" });
     }
-
-    parsedProblems.forEach((p) => {
-      if (p.name) db.createProblem(dayId, p.name, p.external_link || null, p.description || null);
-    });
-
-    const day = db.getDayById(dayId);
-    const dayProblems = db.getProblemsByDayId(dayId);
-    res.json({ day, problems: dayProblems });
   }
 );
 
 // Toggle day open/closed
-app.patch("/api/admin/days/:id/toggle", adminMiddleware, (req, res) => {
-  const day = db.getDayById(parseInt(req.params.id));
-  if (!day) return res.status(404).json({ error: "Day not found" });
-  db.updateDayOpenStatus(day.id, !day.is_open);
-  res.json({ success: true, is_open: !day.is_open });
+app.patch("/api/admin/days/:id/toggle", adminMiddleware, async (req, res) => {
+  try {
+    const day = await db.getDayById(parseInt(req.params.id));
+    if (!day) return res.status(404).json({ error: "Day not found" });
+    await db.updateDayOpenStatus(day.id, !day.is_open);
+    res.json({ success: true, is_open: !day.is_open });
+  } catch (e) {
+    res.status(500).json({ error: "Failed to toggle day" });
+  }
 });
 
 // Delete day and related data
-app.delete("/api/admin/days/:id", adminMiddleware, (req, res) => {
-  const dayId = parseInt(req.params.id);
-  const day = db.getDayById(dayId);
-  if (!day) return res.status(404).json({ error: "Day not found" });
+app.delete("/api/admin/days/:id", adminMiddleware, async (req, res) => {
+  try {
+    const dayId = parseInt(req.params.id);
+    const day = await db.getDayById(dayId);
+    if (!day) return res.status(404).json({ error: "Day not found" });
 
-  db.deleteDay(dayId);
+    await db.deleteDay(dayId);
 
-  if (day.poster_path) {
-    const posterFile = path.join(UPLOADS_DIR, day.poster_path);
-    if (fs.existsSync(posterFile)) {
-      try {
-        fs.unlinkSync(posterFile);
-      } catch (err) {
-        console.warn("Failed to delete poster file:", err);
+    if (day.poster_path) {
+      const posterFile = path.join(UPLOADS_DIR, day.poster_path);
+      if (fs.existsSync(posterFile)) {
+        try {
+          fs.unlinkSync(posterFile);
+        } catch (err) {
+          console.warn("Failed to delete poster file:", err);
+        }
       }
     }
-  }
 
-  res.json({ success: true });
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: "Failed to delete day" });
+  }
 });
 
 // Get all days (admin)
-app.get("/api/admin/days", adminMiddleware, (req, res) => {
-  const days = db.getAllDays();
-  const result = days.map((d) => ({
-    day: d,
-    problems: db.getProblemsByDayId(d.id),
-  }));
-  res.json(result);
+app.get("/api/admin/days", adminMiddleware, async (req, res) => {
+  try {
+    const days = await db.getAllDays();
+    const result = [];
+    for (const d of days) {
+      result.push({
+        day: d,
+        problems: await db.getProblemsByDayId(d.id),
+      });
+    }
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: "Failed to load days" });
+  }
 });
 
 // Full standings
-app.get("/api/admin/standings", adminMiddleware, (req, res) => {
-  const standings = db.getFullStandings();
-  const problems = db.getAllProblems();
-  const days = db.getAllDays();
-  res.json({ standings, problems, days });
+app.get("/api/admin/standings", adminMiddleware, async (req, res) => {
+  try {
+    const standings = await db.getFullStandings();
+    const problems = await db.getAllProblems();
+    const days = await db.getAllDays();
+    res.json({ standings, problems, days });
+  } catch (e) {
+    res.status(500).json({ error: "Failed to load standings" });
+  }
 });
 
 // Get point config
-app.get("/api/admin/point-config", adminMiddleware, (req, res) => {
-  res.json(db.getPointConfig());
+app.get("/api/admin/point-config", adminMiddleware, async (req, res) => {
+  try {
+    res.json(await db.getPointConfig());
+  } catch (e) {
+    res.status(500).json({ error: "Failed to load point config" });
+  }
 });
 
 // Update point config
-app.put("/api/admin/point-config", adminMiddleware, (req, res) => {
-  const { tier1_hrs, tier2_hrs, tier3_hrs, tier1_pts, tier2_pts, tier3_pts } = req.body;
-  db.updatePointConfig(tier1_hrs, tier2_hrs, tier3_hrs, tier1_pts, tier2_pts, tier3_pts);
-  res.json({ success: true });
+app.put("/api/admin/point-config", adminMiddleware, async (req, res) => {
+  try {
+    const { tier1_hrs, tier2_hrs, tier3_hrs, tier1_pts, tier2_pts, tier3_pts } = req.body;
+    await db.updatePointConfig(tier1_hrs, tier2_hrs, tier3_hrs, tier1_pts, tier2_pts, tier3_pts);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: "Failed to update point config" });
+  }
 });
 
 // Admin undo a submission
-app.delete("/api/admin/submissions", adminMiddleware, (req, res) => {
-  const { user_id, problem_id } = req.body;
-  if (!user_id || !problem_id)
-    return res.status(400).json({ error: "user_id and problem_id required" });
-  db.deleteSubmission(user_id, problem_id);
-  res.json({ success: true });
+app.delete("/api/admin/submissions", adminMiddleware, async (req, res) => {
+  try {
+    const { user_id, problem_id } = req.body;
+    if (!user_id || !problem_id)
+      return res.status(400).json({ error: "user_id and problem_id required" });
+    await db.deleteSubmission(user_id, problem_id);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: "Failed to delete submission" });
+  }
 });
 
 // Admin reset a user's password to "default"
@@ -345,12 +403,12 @@ app.post("/api/admin/reset-password", adminMiddleware, async (req, res) => {
   const { user_id } = req.body;
   if (!user_id) return res.status(400).json({ error: "user_id required" });
 
-  const user = db.getUserById(user_id);
+  const user = await db.getUserById(user_id);
   if (!user) return res.status(404).json({ error: "User not found" });
 
   try {
     const hashed = await bcrypt.hash("default", 10);
-    db.updateUserPassword(user_id, hashed);
+    await db.updateUserPassword(user_id, hashed);
     res.json({ success: true, username: user.username });
   } catch (e) {
     res.status(500).json({ error: "Failed to reset password" });
@@ -358,17 +416,25 @@ app.post("/api/admin/reset-password", adminMiddleware, async (req, res) => {
 });
 
 // Get all users (admin)
-app.get("/api/admin/users", adminMiddleware, (req, res) => {
-  res.json(db.getAllUsers());
+app.get("/api/admin/users", adminMiddleware, async (req, res) => {
+  try {
+    res.json(await db.getAllUsers());
+  } catch (e) {
+    res.status(500).json({ error: "Failed to load users" });
+  }
 });
 
 // Export all data
-app.get("/api/admin/export", adminMiddleware, (req, res) => {
-  const data = db.exportAllData();
-  const filename = `codesprint-backup-${new Date().toISOString().slice(0, 10)}.json`;
-  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
-  res.setHeader("Content-Type", "application/json");
-  res.json(data);
+app.get("/api/admin/export", adminMiddleware, async (req, res) => {
+  try {
+    const data = await db.exportAllData();
+    const filename = `codesprint-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.setHeader("Content-Type", "application/json");
+    res.json(data);
+  } catch (e) {
+    res.status(500).json({ error: "Failed to export data" });
+  }
 });
 
 // Import all data
@@ -376,12 +442,12 @@ app.post(
   "/api/admin/import",
   adminMiddleware,
   upload.single("backup"),
-  (req, res) => {
+  async (req, res) => {
     if (!req.file) return res.status(400).json({ error: "No file uploaded" });
     try {
       const raw = fs.readFileSync(req.file.path, "utf-8");
       const data = JSON.parse(raw);
-      db.importAllData(data);
+      await db.importAllData(data);
       // Clean up temp file
       fs.unlinkSync(req.file.path);
       res.json({ success: true });
@@ -400,9 +466,14 @@ app.get("*", (req, res) => {
   res.sendFile(path.join(clientDistPath, "index.html"));
 });
 
-// ─── Start ───────────────────────────────────────────────────────────────────
-app.listen(config.PORT, () => {
-  console.log(`\n🔴 COPS Code Sprint Server running on port ${config.PORT}`);
-  console.log(`   Admin login: ${config.ADMIN_USERNAME} / ${config.ADMIN_PASSWORD}`);
-  console.log(`   DB: ${path.join(__dirname, "database.sqlite")}\n`);
-});
+// ─── Start (connect to Turso first, then listen) ─────────────────────────────
+db.initDatabase()
+  .then(() => {
+    app.listen(config.PORT, () => {
+      console.log(`\n🔴 COPS Code Sprint Server running on port ${config.PORT}\n`);
+    });
+  })
+  .catch((err) => {
+    console.error("Fatal: Could not initialize database", err);
+    process.exit(1);
+  });
